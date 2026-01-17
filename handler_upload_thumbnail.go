@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"io"
 
-	"encoding/base64"
+	"path/filepath"
+	"strings"
+	"os"
+	"mime"
 
 	"github.com/tavis7/bootdev-tubely/internal/auth"
 	"github.com/google/uuid"
@@ -42,13 +45,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	mediaType := fileHeader.Header.Get("Content-Type")
-	data, err := io.ReadAll(file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error reading form file", err)
-		return
-	}
-
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Video not found", err)
@@ -60,14 +56,40 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	//thumbnail := thumbnail{
-	//	data: data,
-	//	mediaType: mediaType,
-	//}
+	mediaType, _, err := mime.ParseMediaType(fileHeader.Header.Get("Content-Type"))
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
 
-	// thumbnailURL := fmt.Sprintf("http://localhost:%v/api/thumbnails/%v", cfg.port, videoIDString)
-	videoDataBase64 := base64.StdEncoding.EncodeToString(data)
-	thumbnailURL := fmt.Sprintf("data:%v;base64,%v", mediaType, videoDataBase64)
+	// TODO hack
+	extension := strings.Split(mediaType, "/")[1]
+
+	allowedFiletypes := map[string]struct{}{
+		"image/jpeg": struct{}{},
+		"image/png": struct{}{},
+	}
+
+	_, ok := allowedFiletypes[mediaType]
+	if !ok {
+		respondWithError(w, http.StatusBadRequest, "Invalid file type", nil)
+		return
+	}
+
+	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%v.%v", videoID, extension))
+	localFile, err := os.Create(filePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error reading form file", err)
+		return
+	}
+
+	_, err = io.Copy(localFile, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
+		return
+	}
+
+	thumbnailURL := fmt.Sprintf("http://localhost:%v/assets/%v.%v", cfg.port, videoIDString, extension)
 
 	video.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(video)
