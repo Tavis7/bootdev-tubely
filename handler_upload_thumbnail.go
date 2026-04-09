@@ -2,16 +2,18 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"io"
+	"net/http"
 
+	"crypto/rand"
+	"encoding/base64"
+	"mime"
+	"os"
 	"path/filepath"
 	"strings"
-	"os"
-	"mime"
 
-	"github.com/tavis7/bootdev-tubely/internal/auth"
 	"github.com/google/uuid"
+	"github.com/tavis7/bootdev-tubely/internal/auth"
 )
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -34,23 +36,22 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
-	// TODO: implement the upload here
-	const maxMemory = 10<<20
+	const maxMemory = 10 << 20
 	file, fileHeader, err := r.FormFile("thumbnail")
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error reading form file", err)
+		respondWithError(w, http.StatusInternalServerError, "Error reading from file", err)
 		return
 	}
+	defer file.Close()
 
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Video not found", err)
 		return
 	}
-	
+
 	if video.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized", nil)
 		return
@@ -58,16 +59,15 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	mediaType, _, err := mime.ParseMediaType(fileHeader.Header.Get("Content-Type"))
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Unauthorized", nil)
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized", err)
 		return
 	}
 
-	// TODO hack
 	extension := strings.Split(mediaType, "/")[1]
 
 	allowedFiletypes := map[string]struct{}{
 		"image/jpeg": struct{}{},
-		"image/png": struct{}{},
+		"image/png":  struct{}{},
 	}
 
 	_, ok := allowedFiletypes[mediaType]
@@ -76,10 +76,18 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%v.%v", videoID, extension))
+	thumbnailIDRaw := [32]byte{}
+	_, err = rand.Read(thumbnailIDRaw[:])
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
+		return
+	}
+	thumbnailID := base64.RawURLEncoding.EncodeToString(thumbnailIDRaw[:])
+	fileName := fmt.Sprintf("%v.%v", thumbnailID, extension)
+	filePath := filepath.Join(cfg.assetsRoot, fileName)
 	localFile, err := os.Create(filePath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error reading form file", err)
+		respondWithError(w, http.StatusInternalServerError, "Error reading from file", err)
 		return
 	}
 
@@ -89,7 +97,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumbnailURL := fmt.Sprintf("http://localhost:%v/assets/%v.%v", cfg.port, videoIDString, extension)
+	thumbnailURL := fmt.Sprintf("http://localhost:%v/assets/%v", cfg.port, fileName)
 
 	video.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(video)
