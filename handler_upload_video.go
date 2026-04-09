@@ -72,13 +72,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	tmpFile, err := os.CreateTemp("", "tubely-upload-*.mp4")
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError,
 			"Couldn't create temporary file", err)
 		return
 	}
-	//defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
 
 	reader := http.MaxBytesReader(w, file, maxVideoSize)
 	io.Copy(tmpFile, reader)
@@ -91,10 +91,24 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	processedFilePath, err := processVideoForFastStart(tmpFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error processing video", err)
+		return
+	}
+
+	processedFile, err := os.Open(processedFilePath);
+	defer processedFile.Close();
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error opening processed video", err)
+		return
+	}
+
 	fileIDRaw := [32]byte{}
 	_, err = rand.Read(fileIDRaw[:])
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error saving video", err)
+		return
 	}
 	fileID := base64.RawURLEncoding.EncodeToString(fileIDRaw[:])
 	filename := fmt.Sprintf("%v.mp4", fileID)
@@ -102,7 +116,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &objectKey,
-		Body:        tmpFile,
+		Body:        processedFile,
 		ContentType: &filetype,
 	})
 	url := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v",
@@ -159,4 +173,27 @@ func getVideoAspectRatio(filePath string) (string, error) {
 		result = "portrait"
 	}
 	return result, nil
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	processedPath := filePath + ".processed"
+
+	runner := exec.Command(
+		"ffmpeg",
+		"-i", filePath,
+		"-c", "copy",
+		"-movflags", "faststart",
+		"-f", "mp4",
+		processedPath,
+	)
+
+	buffer := bytes.Buffer{}
+	errBuffer := bytes.Buffer{}
+	runner.Stdout = &buffer
+	runner.Stderr = &errBuffer
+	err := runner.Run()
+	if err != nil {
+		return "", fmt.Errorf("%v: %v", err, errBuffer.String())
+	}
+	return processedPath, nil
 }
