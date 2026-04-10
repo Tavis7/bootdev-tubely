@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
-	"time"
 
 	"crypto/rand"
 	"encoding/base64"
@@ -20,7 +18,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tavis7/bootdev-tubely/internal/auth"
-	"github.com/tavis7/bootdev-tubely/internal/database"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -100,8 +97,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	processedFile, err := os.Open(processedFilePath)
-	defer processedFile.Close()
+	processedFile, err := os.Open(processedFilePath);
+	defer processedFile.Close();
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error opening processed video", err)
 		return
@@ -122,8 +119,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		Body:        processedFile,
 		ContentType: &filetype,
 	})
-	url := fmt.Sprintf("%v,%v",
-		cfg.s3Bucket, objectKey)
+	url := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v",
+		cfg.s3Bucket, cfg.s3Region, objectKey)
 	video.VideoURL = &url
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
@@ -131,43 +128,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	responseVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		fmt.Println("Failed to sign video URL", err)
-	}
-	respondWithJSON(w, http.StatusOK, responseVideo)
-}
-
-func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
-	if video.VideoURL == nil {
-		return video, nil
-	}
-	parts := strings.Split(*video.VideoURL, ",")
-	if len(parts) != 2 {
-		return video, fmt.Errorf("Invalid video resource location: %v", video.VideoURL)
-	}
-	url, err := generatePresignedURL(cfg.s3Client, parts[0], parts[1], 5*time.Minute)
-	if err != nil {
-		return database.Video{}, err
-	}
-	video.VideoURL = &url
-	return video, nil
-}
-
-func generatePresignedURL(s3client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
-
-	presignClient := s3.NewPresignClient(s3client)
-	object, err := presignClient.PresignGetObject(context.Background(),
-		&s3.GetObjectInput{
-			Bucket: &bucket,
-			Key:    &key,
-		},
-		s3.WithPresignExpires(expireTime))
-	if err != nil {
-		return "", fmt.Errorf("Failed to sign URL: %v", err)
-	}
-
-	return object.URL, nil
+	respondWithJSON(w, http.StatusOK, video)
 }
 
 func getVideoAspectRatio(filePath string) (string, error) {

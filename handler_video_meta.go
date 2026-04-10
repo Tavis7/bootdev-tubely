@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -41,12 +40,7 @@ func (cfg *apiConfig) handlerVideoMetaCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	responseVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to sign URL", err)
-		return
-	}
-	respondWithJSON(w, http.StatusCreated, responseVideo)
+	respondWithJSON(w, http.StatusCreated, video)
 }
 
 func (cfg *apiConfig) handlerVideoMetaDelete(w http.ResponseWriter, r *http.Request) {
@@ -101,11 +95,7 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	responseVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		fmt.Println("Failed to sign video URL", err)
-	}
-	respondWithJSON(w, http.StatusOK, responseVideo)
+	respondWithJSON(w, http.StatusOK, video)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -126,18 +116,5 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	responseVideos := []database.Video{}
-	errCount := 0
-	for _, video := range videos {
-		responseVideo, err := cfg.dbVideoToSignedVideo(video)
-		if err != nil {
-			errCount += 1
-		}
-		responseVideos = append(responseVideos, responseVideo)
-	}
-	if errCount > 0 {
-		fmt.Println("Failed to sign %v video URL(s)", errCount)
-	}
-
-	respondWithJSON(w, http.StatusOK, responseVideos)
+	respondWithJSON(w, http.StatusOK, videos)
 }
